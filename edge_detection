@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import matplotlib.pyplot as plt
+from scipy import ndimage
+from scipy.signal import convolve2d
 
 def load_image_as_dataframe(image_path):
     """
@@ -16,13 +18,25 @@ def load_image_as_dataframe(image_path):
     img = Image.open(image_path).convert('L')
     img_array = np.array(img, dtype=np.float32)
     
+    # Resize if image is too large for faster processing
+    if img_array.shape[0] > 1000 or img_array.shape[1] > 1000:
+        from PIL import Image as PILImage
+        img_pil = PILImage.fromarray(img_array.astype(np.uint8))
+        # Resize to max 800px on longest side
+        max_size = 800
+        ratio = min(max_size/img_array.shape[0], max_size/img_array.shape[1])
+        new_size = (int(img_array.shape[1] * ratio), int(img_array.shape[0] * ratio))
+        img_pil = img_pil.resize(new_size, PILImage.Resampling.LANCZOS)
+        img_array = np.array(img_pil, dtype=np.float32)
+        print(f"Image resized to {img_array.shape} for faster processing")
+    
     # Convert to DataFrame with row and column indices
     df = pd.DataFrame(img_array)
     return df
 
-def sobel_edge_detection_pandas(image_path, threshold=50):
+def fast_sobel_edge_detection_pandas(image_path, threshold=50):
     """
-    Perform edge detection using Sobel operator with pandas operations.
+    Fast edge detection using Sobel operator with scipy optimization.
     
     Args:
         image_path (str): Path to the input image
@@ -43,84 +57,64 @@ def sobel_edge_detection_pandas(image_path, threshold=50):
                         [ 0,  0,  0],
                         [ 1,  2,  1]], dtype=np.float32)
     
-    # Apply convolution using pandas operations
-    grad_x_df = convolve_dataframe(img_df, sobel_x)
-    grad_y_df = convolve_dataframe(img_df, sobel_y)
+    # Use scipy's optimized convolution (MUCH faster)
+    grad_x = convolve2d(img_df.values, sobel_x, mode='same', boundary='symm')
+    grad_y = convolve2d(img_df.values, sobel_y, mode='same', boundary='symm')
     
-    # Calculate gradient magnitude using pandas operations
-    gradient_magnitude_df = np.sqrt(grad_x_df**2 + grad_y_df**2)
+    # Convert back to DataFrames
+    grad_x_df = pd.DataFrame(grad_x, index=img_df.index, columns=img_df.columns)
+    grad_y_df = pd.DataFrame(grad_y, index=img_df.index, columns=img_df.columns)
+    
+    # Calculate gradient magnitude using vectorized operations
+    gradient_magnitude_df = pd.DataFrame(
+        np.sqrt(grad_x_df.values**2 + grad_y_df.values**2),
+        index=img_df.index, 
+        columns=img_df.columns
+    )
     
     # Apply threshold to create binary edge map
-    edges_df = (gradient_magnitude_df > threshold).astype(int) * 255
+    edges_df = pd.DataFrame(
+        (gradient_magnitude_df.values > threshold).astype(int) * 255,
+        index=img_df.index,
+        columns=img_df.columns
+    )
     
     return img_df, edges_df, gradient_magnitude_df
 
-def convolve_dataframe(df, kernel):
+def ultra_fast_sobel_pandas(image_path, threshold=50):
     """
-    Perform 2D convolution on a pandas DataFrame.
+    Ultra-fast edge detection using scipy.ndimage (fastest option).
     
     Args:
-        df (pandas.DataFrame): Input image DataFrame
-        kernel (numpy.ndarray): Convolution kernel
+        image_path (str): Path to the input image
+        threshold (int): Threshold value for edge detection (0-255)
     
     Returns:
-        pandas.DataFrame: Convolved result
+        tuple: (original_df, edges_df, gradient_magnitude_df)
     """
-    kernel_h, kernel_w = kernel.shape
-    pad_h, pad_w = kernel_h // 2, kernel_w // 2
+    # Load image as DataFrame
+    img_df = load_image_as_dataframe(image_path)
     
-    # Create padded DataFrame
-    padded_df = pad_dataframe(df, pad_h, pad_w)
+    # Use scipy's built-in Sobel filters (fastest method)
+    grad_x = ndimage.sobel(img_df.values, axis=1)  # Horizontal gradient
+    grad_y = ndimage.sobel(img_df.values, axis=0)  # Vertical gradient
     
-    # Initialize result DataFrame
-    result_df = pd.DataFrame(np.zeros_like(df), index=df.index, columns=df.columns)
+    # Calculate gradient magnitude
+    magnitude = np.sqrt(grad_x**2 + grad_y**2)
     
-    # Get original image dimensions
-    h, w = df.shape
+    # Convert to DataFrames
+    grad_x_df = pd.DataFrame(grad_x, index=img_df.index, columns=img_df.columns)
+    grad_y_df = pd.DataFrame(grad_y, index=img_df.index, columns=img_df.columns)
+    gradient_magnitude_df = pd.DataFrame(magnitude, index=img_df.index, columns=img_df.columns)
     
-    # Perform convolution using position indices instead of DataFrame indices
-    for i in range(h):
-        for j in range(w):
-            # Extract region of interest from padded DataFrame
-            # Use position-based indexing to ensure correct kernel size extraction
-            start_row = i
-            end_row = i + kernel_h
-            start_col = j
-            end_col = j + kernel_w
-            
-            roi = padded_df.iloc[start_row:end_row, start_col:end_col].values
-            
-            # Ensure roi has the same shape as kernel
-            if roi.shape == kernel.shape:
-                # Apply kernel and store result using original DataFrame indices
-                result_df.iloc[i, j] = np.sum(roi * kernel)
+    # Apply threshold
+    edges_df = pd.DataFrame(
+        (magnitude > threshold).astype(int) * 255,
+        index=img_df.index,
+        columns=img_df.columns
+    )
     
-    return result_df
-
-def pad_dataframe(df, pad_h, pad_w, mode='constant', constant_value=0):
-    """
-    Pad a DataFrame for convolution operations.
-    
-    Args:
-        df (pandas.DataFrame): Input DataFrame
-        pad_h (int): Vertical padding
-        pad_w (int): Horizontal padding
-        mode (str): Padding mode
-        constant_value (int): Value for constant padding
-    
-    Returns:
-        pandas.DataFrame: Padded DataFrame
-    """
-    h, w = df.shape
-    
-    # Create padded array using numpy for easier handling
-    padded_array = np.pad(df.values, ((pad_h, pad_h), (pad_w, pad_w)), 
-                         mode=mode, constant_values=constant_value)
-    
-    # Convert back to DataFrame with sequential indices
-    padded_df = pd.DataFrame(padded_array)
-    
-    return padded_df
+    return img_df, edges_df, gradient_magnitude_df
 
 def analyze_edges_with_pandas(edges_df, original_df):
     """
@@ -136,7 +130,7 @@ def analyze_edges_with_pandas(edges_df, original_df):
     # Convert to binary for analysis
     binary_edges = (edges_df > 0).astype(int)
     
-    # Calculate statistics using pandas
+    # Calculate statistics using pandas (vectorized operations)
     total_pixels = edges_df.size
     edge_pixels = binary_edges.sum().sum()
     edge_percentage = (edge_pixels / total_pixels) * 100
@@ -177,7 +171,7 @@ def edge_profile_analysis(edges_df):
     Returns:
         dict: Profile analysis results
     """
-    # Calculate row and column edge profiles
+    # Calculate row and column edge profiles (vectorized)
     row_profile = edges_df.sum(axis=1)  # Sum across columns for each row
     col_profile = edges_df.sum(axis=0)  # Sum across rows for each column
     
@@ -279,8 +273,12 @@ def create_edge_dataframe_report(edges_df, original_df):
     # Profile analysis
     profile_analysis = edge_profile_analysis(edges_df)
     
-    # Edge intensity distribution
-    edge_intensity_dist = edges_df[edges_df > 0].stack().describe()
+    # Edge intensity distribution (only for non-zero edges for speed)
+    edge_pixels = edges_df.values[edges_df.values > 0]
+    if len(edge_pixels) > 0:
+        edge_intensity_dist = pd.Series(edge_pixels).describe()
+    else:
+        edge_intensity_dist = pd.Series([0]).describe()
     
     # Create summary report
     report = {
@@ -292,61 +290,79 @@ def create_edge_dataframe_report(edges_df, original_df):
     
     return report
 
-# Example usage with pandas-focused workflow
+# Example usage with optimized pandas workflow
 if __name__ == "__main__":
+    import time
+    
     try:
-        image_path = "test.gif"  # Replace with your image path
+        image_path = "pic2_zoomed.png"  # Replace with your image path
         
-        # Perform edge detection
-        original_df, edges_df, magnitude_df = sobel_edge_detection_pandas(image_path, threshold=50)
+        print("Starting ULTRA-FAST edge detection...")
+        start_time = time.time()
         
-        # Comprehensive analysis using pandas
+        # Use the ultra-fast version
+        original_df, edges_df, magnitude_df = ultra_fast_sobel_pandas(image_path, threshold=50)
+        
+        processing_time = time.time() - start_time
+        print(f"Edge detection completed in {processing_time:.3f} seconds")
+        
+        # Quick analysis
+        print("Performing analysis...")
+        analysis_start = time.time()
+        
         report = create_edge_dataframe_report(edges_df, original_df)
         
+        analysis_time = time.time() - analysis_start
+        print(f"Analysis completed in {analysis_time:.3f} seconds")
+        
         # Display results
-        print("Edge Detection Analysis Report")
+        print("\nEdge Detection Analysis Report")
         print("=" * 40)
+        print(f"Image size: {original_df.shape}")
+        print(f"Processing time: {processing_time:.3f}s")
+        print(f"Analysis time: {analysis_time:.3f}s")
+        print(f"Total time: {processing_time + analysis_time:.3f}s")
+        
         print("\nBasic Statistics:")
         print(report['stats'])
         
         print(f"\nRow with most edges: {report['profiles']['max_edge_row']}")
         print(f"Column with most edges: {report['profiles']['max_edge_col']}")
         
-        print("\nEdge Intensity Distribution:")
-        print(report['intensity_distribution'])
-        
         # Visualize results
         visualize_results_with_pandas(original_df, edges_df, report)
         
-        # Save results as CSV files
-        edges_df.to_csv('detected_edges.csv')
-        report['profiles']['row_profile'].to_csv('row_edge_profile.csv', index=False)
-        report['profiles']['col_profile'].to_csv('col_edge_profile.csv', index=False)
-        
-        print("\nResults saved to CSV files:")
-        print("- detected_edges.csv")
-        print("- row_edge_profile.csv") 
-        print("- col_edge_profile.csv")
+        # Save results as CSV files (optional - comment out for speed)
+        # edges_df.to_csv('detected_edges.csv')
+        # report['profiles']['row_profile'].to_csv('row_edge_profile.csv', index=False)
+        # report['profiles']['col_profile'].to_csv('col_edge_profile.csv', index=False)
         
     except FileNotFoundError:
         print("Please provide a valid image path to test the edge detection algorithms.")
+        print("Creating synthetic test data...")
         
-        # Create synthetic test data as DataFrame
-        test_data = np.zeros((50, 50))
-        test_data[10:40, 10:15] = 255  # Vertical edge
-        test_data[20:25, 10:40] = 255  # Horizontal edge
+        # Create synthetic test data as DataFrame (smaller for demo)
+        test_data = np.zeros((100, 100))
+        test_data[20:80, 20:25] = 255  # Vertical edge
+        test_data[40:45, 20:80] = 255  # Horizontal edge
         
         test_df = pd.DataFrame(test_data)
-        print("Created synthetic test image as DataFrame:")
-        print(f"Shape: {test_df.shape}")
-        print(f"Data type: {test_df.dtypes[0]}")
         
-        # Apply simple edge detection
-        grad_x_df = convolve_dataframe(test_df, np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]))
-        grad_y_df = convolve_dataframe(test_df, np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]]))
+        # Apply ultra-fast edge detection
+        start_time = time.time()
         
-        edges_test_df = np.sqrt(grad_x_df**2 + grad_y_df**2)
-        edges_test_df = (edges_test_df > 50).astype(int) * 255
+        grad_x = ndimage.sobel(test_df.values, axis=1)
+        grad_y = ndimage.sobel(test_df.values, axis=0)
+        magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        
+        edges_test_df = pd.DataFrame(
+            (magnitude > 50).astype(int) * 255,
+            index=test_df.index,
+            columns=test_df.columns
+        )
+        
+        processing_time = time.time() - start_time
+        print(f"Test processing completed in {processing_time:.4f} seconds")
         
         # Analyze test results
         test_report = create_edge_dataframe_report(edges_test_df, test_df)
