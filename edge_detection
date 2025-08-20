@@ -1,0 +1,358 @@
+import numpy as np
+import pandas as pd
+from PIL import Image
+import matplotlib.pyplot as plt
+
+def load_image_as_dataframe(image_path):
+    """
+    Load image and convert to pandas DataFrame.
+    
+    Args:
+        image_path (str): Path to the input image
+    
+    Returns:
+        pandas.DataFrame: Image data as DataFrame
+    """
+    img = Image.open(image_path).convert('L')
+    img_array = np.array(img, dtype=np.float32)
+    
+    # Convert to DataFrame with row and column indices
+    df = pd.DataFrame(img_array)
+    return df
+
+def sobel_edge_detection_pandas(image_path, threshold=50):
+    """
+    Perform edge detection using Sobel operator with pandas operations.
+    
+    Args:
+        image_path (str): Path to the input image
+        threshold (int): Threshold value for edge detection (0-255)
+    
+    Returns:
+        tuple: (original_df, edges_df, gradient_magnitude_df)
+    """
+    # Load image as DataFrame
+    img_df = load_image_as_dataframe(image_path)
+    
+    # Define Sobel kernels
+    sobel_x = np.array([[-1, 0, 1],
+                        [-2, 0, 2],
+                        [-1, 0, 1]], dtype=np.float32)
+    
+    sobel_y = np.array([[-1, -2, -1],
+                        [ 0,  0,  0],
+                        [ 1,  2,  1]], dtype=np.float32)
+    
+    # Apply convolution using pandas operations
+    grad_x_df = convolve_dataframe(img_df, sobel_x)
+    grad_y_df = convolve_dataframe(img_df, sobel_y)
+    
+    # Calculate gradient magnitude using pandas operations
+    gradient_magnitude_df = np.sqrt(grad_x_df**2 + grad_y_df**2)
+    
+    # Apply threshold to create binary edge map
+    edges_df = (gradient_magnitude_df > threshold).astype(int) * 255
+    
+    return img_df, edges_df, gradient_magnitude_df
+
+def convolve_dataframe(df, kernel):
+    """
+    Perform 2D convolution on a pandas DataFrame.
+    
+    Args:
+        df (pandas.DataFrame): Input image DataFrame
+        kernel (numpy.ndarray): Convolution kernel
+    
+    Returns:
+        pandas.DataFrame: Convolved result
+    """
+    kernel_h, kernel_w = kernel.shape
+    pad_h, pad_w = kernel_h // 2, kernel_w // 2
+    
+    # Create padded DataFrame
+    padded_df = pad_dataframe(df, pad_h, pad_w)
+    
+    # Initialize result DataFrame
+    result_df = pd.DataFrame(np.zeros_like(df), index=df.index, columns=df.columns)
+    
+    # Get original image dimensions
+    h, w = df.shape
+    
+    # Perform convolution using position indices instead of DataFrame indices
+    for i in range(h):
+        for j in range(w):
+            # Extract region of interest from padded DataFrame
+            # Use position-based indexing to ensure correct kernel size extraction
+            start_row = i
+            end_row = i + kernel_h
+            start_col = j
+            end_col = j + kernel_w
+            
+            roi = padded_df.iloc[start_row:end_row, start_col:end_col].values
+            
+            # Ensure roi has the same shape as kernel
+            if roi.shape == kernel.shape:
+                # Apply kernel and store result using original DataFrame indices
+                result_df.iloc[i, j] = np.sum(roi * kernel)
+    
+    return result_df
+
+def pad_dataframe(df, pad_h, pad_w, mode='constant', constant_value=0):
+    """
+    Pad a DataFrame for convolution operations.
+    
+    Args:
+        df (pandas.DataFrame): Input DataFrame
+        pad_h (int): Vertical padding
+        pad_w (int): Horizontal padding
+        mode (str): Padding mode
+        constant_value (int): Value for constant padding
+    
+    Returns:
+        pandas.DataFrame: Padded DataFrame
+    """
+    h, w = df.shape
+    
+    # Create padded array using numpy for easier handling
+    padded_array = np.pad(df.values, ((pad_h, pad_h), (pad_w, pad_w)), 
+                         mode=mode, constant_values=constant_value)
+    
+    # Convert back to DataFrame with sequential indices
+    padded_df = pd.DataFrame(padded_array)
+    
+    return padded_df
+
+def analyze_edges_with_pandas(edges_df, original_df):
+    """
+    Analyze edge detection results using pandas operations.
+    
+    Args:
+        edges_df (pandas.DataFrame): Edge detection results
+        original_df (pandas.DataFrame): Original image data
+    
+    Returns:
+        dict: Analysis results
+    """
+    # Convert to binary for analysis
+    binary_edges = (edges_df > 0).astype(int)
+    
+    # Calculate statistics using pandas
+    total_pixels = edges_df.size
+    edge_pixels = binary_edges.sum().sum()
+    edge_percentage = (edge_pixels / total_pixels) * 100
+    
+    # Find edge density by region (divide image into quadrants)
+    h, w = edges_df.shape
+    mid_h, mid_w = h // 2, w // 2
+    
+    quadrants = {
+        'top_left': binary_edges.iloc[:mid_h, :mid_w].sum().sum(),
+        'top_right': binary_edges.iloc[:mid_h, mid_w:].sum().sum(),
+        'bottom_left': binary_edges.iloc[mid_h:, :mid_w].sum().sum(),
+        'bottom_right': binary_edges.iloc[mid_h:, mid_w:].sum().sum()
+    }
+    
+    # Create edge statistics DataFrame
+    stats_df = pd.DataFrame({
+        'Metric': ['Total Pixels', 'Edge Pixels', 'Edge Percentage', 
+                  'Top Left Edges', 'Top Right Edges', 'Bottom Left Edges', 'Bottom Right Edges'],
+        'Value': [total_pixels, edge_pixels, f"{edge_percentage:.2f}%",
+                 quadrants['top_left'], quadrants['top_right'], 
+                 quadrants['bottom_left'], quadrants['bottom_right']]
+    })
+    
+    return {
+        'stats': stats_df,
+        'quadrants': quadrants,
+        'edge_percentage': edge_percentage
+    }
+
+def edge_profile_analysis(edges_df):
+    """
+    Analyze edge profiles using pandas operations.
+    
+    Args:
+        edges_df (pandas.DataFrame): Edge detection results
+    
+    Returns:
+        dict: Profile analysis results
+    """
+    # Calculate row and column edge profiles
+    row_profile = edges_df.sum(axis=1)  # Sum across columns for each row
+    col_profile = edges_df.sum(axis=0)  # Sum across rows for each column
+    
+    # Find rows and columns with most edges
+    max_edge_row = row_profile.idxmax()
+    max_edge_col = col_profile.idxmax()
+    
+    # Create profile DataFrames
+    row_profile_df = pd.DataFrame({
+        'Row': row_profile.index,
+        'Edge_Count': row_profile.values
+    })
+    
+    col_profile_df = pd.DataFrame({
+        'Column': col_profile.index,
+        'Edge_Count': col_profile.values
+    })
+    
+    return {
+        'row_profile': row_profile_df,
+        'col_profile': col_profile_df,
+        'max_edge_row': max_edge_row,
+        'max_edge_col': max_edge_col
+    }
+
+def visualize_results_with_pandas(original_df, edges_df, analysis_results):
+    """
+    Visualize edge detection results and analysis.
+    
+    Args:
+        original_df (pandas.DataFrame): Original image
+        edges_df (pandas.DataFrame): Edge detection results
+        analysis_results (dict): Analysis results
+    """
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    
+    # Original image
+    axes[0, 0].imshow(original_df.values, cmap='gray')
+    axes[0, 0].set_title('Original Image')
+    axes[0, 0].axis('off')
+    
+    # Detected edges
+    axes[0, 1].imshow(edges_df.values, cmap='gray')
+    axes[0, 1].set_title('Detected Edges')
+    axes[0, 1].axis('off')
+    
+    # Edge overlay
+    overlay = original_df.values.copy()
+    edge_mask = edges_df.values > 0
+    overlay[edge_mask] = 255
+    axes[0, 2].imshow(overlay, cmap='gray')
+    axes[0, 2].set_title('Edges Overlay')
+    axes[0, 2].axis('off')
+    
+    # Row profile
+    profile_data = analysis_results['profiles']
+    axes[1, 0].plot(profile_data['row_profile']['Edge_Count'])
+    axes[1, 0].set_title('Row Edge Profile')
+    axes[1, 0].set_xlabel('Row Index')
+    axes[1, 0].set_ylabel('Edge Count')
+    
+    # Column profile
+    axes[1, 1].plot(profile_data['col_profile']['Edge_Count'])
+    axes[1, 1].set_title('Column Edge Profile')
+    axes[1, 1].set_xlabel('Column Index')
+    axes[1, 1].set_ylabel('Edge Count')
+    
+    # Statistics text
+    stats_text = f"""Edge Statistics:
+    Total Pixels: {analysis_results['stats']['Value'][0]}
+    Edge Pixels: {analysis_results['stats']['Value'][1]}
+    Edge Percentage: {analysis_results['stats']['Value'][2]}
+    
+    Max Edge Row: {profile_data['max_edge_row']}
+    Max Edge Col: {profile_data['max_edge_col']}"""
+    
+    axes[1, 2].text(0.1, 0.5, stats_text, transform=axes[1, 2].transAxes, 
+                   fontsize=10, verticalalignment='center')
+    axes[1, 2].set_title('Statistics')
+    axes[1, 2].axis('off')
+    
+    plt.tight_layout()
+    plt.show()
+
+def create_edge_dataframe_report(edges_df, original_df):
+    """
+    Create a comprehensive report of edge detection results using pandas.
+    
+    Args:
+        edges_df (pandas.DataFrame): Edge detection results
+        original_df (pandas.DataFrame): Original image data
+    
+    Returns:
+        dict: Comprehensive analysis report
+    """
+    # Basic statistics
+    basic_stats = analyze_edges_with_pandas(edges_df, original_df)
+    
+    # Profile analysis
+    profile_analysis = edge_profile_analysis(edges_df)
+    
+    # Edge intensity distribution
+    edge_intensity_dist = edges_df[edges_df > 0].stack().describe()
+    
+    # Create summary report
+    report = {
+        'stats': basic_stats['stats'],
+        'profiles': profile_analysis,
+        'intensity_distribution': edge_intensity_dist,
+        'quadrant_analysis': basic_stats['quadrants']
+    }
+    
+    return report
+
+# Example usage with pandas-focused workflow
+if __name__ == "__main__":
+    try:
+        image_path = "test.gif"  # Replace with your image path
+        
+        # Perform edge detection
+        original_df, edges_df, magnitude_df = sobel_edge_detection_pandas(image_path, threshold=50)
+        
+        # Comprehensive analysis using pandas
+        report = create_edge_dataframe_report(edges_df, original_df)
+        
+        # Display results
+        print("Edge Detection Analysis Report")
+        print("=" * 40)
+        print("\nBasic Statistics:")
+        print(report['stats'])
+        
+        print(f"\nRow with most edges: {report['profiles']['max_edge_row']}")
+        print(f"Column with most edges: {report['profiles']['max_edge_col']}")
+        
+        print("\nEdge Intensity Distribution:")
+        print(report['intensity_distribution'])
+        
+        # Visualize results
+        visualize_results_with_pandas(original_df, edges_df, report)
+        
+        # Save results as CSV files
+        edges_df.to_csv('detected_edges.csv')
+        report['profiles']['row_profile'].to_csv('row_edge_profile.csv', index=False)
+        report['profiles']['col_profile'].to_csv('col_edge_profile.csv', index=False)
+        
+        print("\nResults saved to CSV files:")
+        print("- detected_edges.csv")
+        print("- row_edge_profile.csv") 
+        print("- col_edge_profile.csv")
+        
+    except FileNotFoundError:
+        print("Please provide a valid image path to test the edge detection algorithms.")
+        
+        # Create synthetic test data as DataFrame
+        test_data = np.zeros((50, 50))
+        test_data[10:40, 10:15] = 255  # Vertical edge
+        test_data[20:25, 10:40] = 255  # Horizontal edge
+        
+        test_df = pd.DataFrame(test_data)
+        print("Created synthetic test image as DataFrame:")
+        print(f"Shape: {test_df.shape}")
+        print(f"Data type: {test_df.dtypes[0]}")
+        
+        # Apply simple edge detection
+        grad_x_df = convolve_dataframe(test_df, np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]))
+        grad_y_df = convolve_dataframe(test_df, np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]]))
+        
+        edges_test_df = np.sqrt(grad_x_df**2 + grad_y_df**2)
+        edges_test_df = (edges_test_df > 50).astype(int) * 255
+        
+        # Analyze test results
+        test_report = create_edge_dataframe_report(edges_test_df, test_df)
+        
+        print("\nTest Results:")
+        print(test_report['stats'])
+        
+        # Visualize test results
+        visualize_results_with_pandas(test_df, edges_test_df, test_report)
