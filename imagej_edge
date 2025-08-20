@@ -1,0 +1,108 @@
+import imagej
+import numpy as np
+import skimage
+from skimage import io
+import matplotlib.pyplot as plt
+
+def run_imagej_find_edges(image_path):
+    """
+    Loads an image, uses PyImageJ to run the 'Find Edges' command,
+    and returns the result as a NumPy array.
+
+    Args:
+        image_path (str): The file path to the input image.
+
+    Returns:
+        tuple: A tuple containing (original_image, edge_image) as NumPy arrays.
+               Returns (None, None) if ImageJ fails to initialize.
+    """
+    try:
+        # 1. Initialize ImageJ
+        # This starts a Java Virtual Machine with ImageJ running.
+        # It can be configured to use a specific version or local installation.
+        print("Initializing ImageJ... (this may take a moment on the first run)")
+        ij = imagej.init(mode='headless')
+        print(f"ImageJ version: {ij.getVersion()}")
+
+        # 2. Load the image using scikit-image
+        # We load it here so we can easily work with it as a NumPy array.
+        print(f"Loading image from: {image_path}")
+        original_image = io.imread(image_path)
+
+        # Ensure the image is 2D (grayscale) for this operation
+        if original_image.ndim > 2:
+            # Convert to grayscale if it's a color image
+            original_image = skimage.color.rgb2gray(original_image)
+            # Convert to 8-bit integer format, as ImageJ often expects this
+            original_image = skimage.util.img_as_ubyte(original_image)
+
+        # 3. Convert the NumPy array to an ImageJ image object
+        # This transfers the image data from Python to the ImageJ instance.
+        print("Converting image to ImageJ format...")
+        img_ij = ij.py.to_java(original_image)
+
+        # 4. Run the "Find Edges" command on the image within ImageJ
+        # We use the ImageJ Macro (IJ.run) function. The first argument is the
+        # target image, the second is the command, and the third is for options.
+        print("Running 'Find Edges' command in ImageJ...")
+        ij.IJ.run(img_ij, "Find Edges", "")
+
+        # 5. Convert the resulting image back to a NumPy array
+        # This brings the processed data back from ImageJ to Python.
+        print("Converting result back to NumPy format...")
+        edge_image = ij.py.from_java(img_ij)
+        
+        # 6. Close the ImageJ gateway
+        # Good practice to release resources when done.
+        ij.getContext().dispose()
+        print("ImageJ context disposed.")
+
+        return original_image, edge_image
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        # Ensure context is disposed even on error
+        if 'ij' in locals() and ij.getContext():
+            ij.getContext().dispose()
+        return None, None
+
+def visualize_results(original, edges):
+    """Displays the original and edge-detected images side-by-side."""
+    if original is None or edges is None:
+        print("Cannot visualize results because an error occurred during processing.")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    
+    axes[0].imshow(original, cmap='gray')
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+    
+    axes[1].imshow(edges, cmap='gray')
+    axes[1].set_title("Edges Detected by ImageJ's 'Find Edges'")
+    axes[1].axis('off')
+    
+    plt.tight_layout()
+    plt.show()
+
+# --- Main execution ---
+if __name__ == "__main__":
+    # Path to your image
+    image_file = "microscope2-2.jpg"
+    
+    # Run the full workflow
+    original, edges = run_imagej_find_edges(image_file)
+    
+    # Display the results
+    visualize_results(original, edges)
+
+    # Now you can use the 'edges' NumPy array for further calculations in Python
+    if edges is not None:
+        print("\nEdge detection complete.")
+        print(f"The 'edges' variable is a NumPy array with shape: {edges.shape}")
+        print(f"Data type: {edges.dtype}")
+        # Example of a further calculation: count edge pixels
+        edge_pixel_count = np.count_nonzero(edges)
+        total_pixels = edges.size
+        print(f"Found {edge_pixel_count} edge pixels ({ (edge_pixel_count/total_pixels)*100 :.2f}% of total).")
+

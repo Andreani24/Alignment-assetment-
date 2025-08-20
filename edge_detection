@@ -4,6 +4,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from scipy import ndimage
 from scipy.signal import convolve2d
+# --- NEW IMPORT ---
+from skimage.transform import hough_line, hough_line_peaks
 
 def load_image_as_dataframe(image_path):
     """
@@ -81,6 +83,31 @@ def fast_sobel_edge_detection_pandas(image_path, threshold=50):
     
     return img_df, edges_df, gradient_magnitude_df
 
+def check_gradient_range(image_path):
+    """
+    Check the gradient magnitude range to help choose appropriate threshold.
+    
+    Args:
+        image_path (str): Path to the input image
+    
+    Returns:
+        numpy.ndarray: Gradient magnitude array
+    """
+    img_df = load_image_as_dataframe(image_path)
+    grad_x = ndimage.sobel(img_df.values, axis=1)
+    grad_y = ndimage.sobel(img_df.values, axis=0)
+    magnitude = np.sqrt(grad_x**2 + grad_y**2)
+    
+    print(f"Gradient magnitude range: {magnitude.min():.2f} to {magnitude.max():.2f}")
+    print(f"Mean gradient: {magnitude.mean():.2f}")
+    print(f"95th percentile: {np.percentile(magnitude, 95):.2f}")
+    print(f"Suggested thresholds:")
+    print(f"  - Low edges (many): {np.percentile(magnitude, 70):.0f}")
+    print(f"  - Medium edges: {np.percentile(magnitude, 85):.0f}")
+    print(f"  - High edges (few): {np.percentile(magnitude, 95):.0f}")
+    
+    return magnitude
+
 def ultra_fast_sobel_pandas(image_path, threshold=50):
     """
     Ultra-fast edge detection using scipy.ndimage (fastest option).
@@ -102,17 +129,28 @@ def ultra_fast_sobel_pandas(image_path, threshold=50):
     # Calculate gradient magnitude
     magnitude = np.sqrt(grad_x**2 + grad_y**2)
     
+    # Debug: Print threshold information
+    print(f"Applied threshold: {threshold}")
+    print(f"Pixels above threshold: {np.sum(magnitude > threshold)}")
+    print(f"Total pixels: {magnitude.size}")
+    print(f"Percentage above threshold: {(np.sum(magnitude > threshold) / magnitude.size) * 100:.2f}%")
+    
     # Convert to DataFrames
     grad_x_df = pd.DataFrame(grad_x, index=img_df.index, columns=img_df.columns)
     grad_y_df = pd.DataFrame(grad_y, index=img_df.index, columns=img_df.columns)
     gradient_magnitude_df = pd.DataFrame(magnitude, index=img_df.index, columns=img_df.columns)
     
-    # Apply threshold
+    # Apply threshold - make sure this is working correctly
+    binary_edges = magnitude > threshold
     edges_df = pd.DataFrame(
-        (magnitude > threshold).astype(int) * 255,
+        binary_edges.astype(int) * 255,
         index=img_df.index,
         columns=img_df.columns
     )
+    
+    # Additional debug: check if threshold is actually working
+    unique_values = np.unique(edges_df.values)
+    print(f"Unique values in edges_df: {unique_values}")
     
     return img_df, edges_df, gradient_magnitude_df
 
@@ -196,17 +234,55 @@ def edge_profile_analysis(edges_df):
         'max_edge_row': max_edge_row,
         'max_edge_col': max_edge_col
     }
-
-def visualize_results_with_pandas(original_df, edges_df, analysis_results):
+# --- NEW FUNCTION FOR LINE DETECTION ---
+def detect_lines_with_hough(edges_df, num_peaks=4, angle_range_deg=10):
     """
-    Visualize edge detection results and analysis.
-    
+    Detects prominent lines in an edge map using the Hough Transform.
+    This is ideal for finding straight edges like the catheter body.
+
     Args:
-        original_df (pandas.DataFrame): Original image
-        edges_df (pandas.DataFrame): Edge detection results
-        analysis_results (dict): Analysis results
+        edges_df (pandas.DataFrame): Binary edge map (255 for edges, 0 for non-edges).
+        num_peaks (int): The maximum number of prominent lines to detect.
+        angle_range_deg (int): The degrees around horizontal to search for lines.
+
+    Returns:
+        list: A list of tuples, where each tuple contains (angle, dist) for a detected line.
+    """
+    print(f"\nDetecting lines with Hough Transform...")
+    image = (edges_df.values > 0).astype(np.uint8)
+
+    # Restrict the search to near-horizontal lines to match the catheter's orientation.
+    # This makes detection faster and more accurate.
+    # Scikit-image angles are in radians. We search around -pi/2 and pi/2 (horizontal).
+    d_angle = np.deg2rad(angle_range_deg)
+    tested_angles = np.linspace(np.pi/2 - d_angle, np.pi/2 + d_angle, 180, endpoint=False)
+
+    # Perform the Hough Transform
+    h, theta, d = hough_line(image, theta=tested_angles)
+
+    # Find peaks in the accumulator array, which correspond to prominent lines
+    hough_threshold = 0.3 * np.max(h) # Heuristic threshold
+    accum, angles, dists = hough_line_peaks(h, theta, d,
+                                           min_distance=15, # Min pixel distance between lines
+                                           threshold=hough_threshold,
+                                           num_peaks=num_peaks)
+
+    print(f"Found {len(angles)} prominent lines.")
+    return list(zip(angles, dists))
+
+# --- MODIFIED VISUALIZATION FUNCTION ---
+def visualize_results_with_pandas(original_df, edges_df, analysis_results, detected_lines=None):
+    """
+    Visualize edge detection results, analysis, and detected lines.
+
+    Args:
+        original_df (pandas.DataFrame): Original image.
+        edges_df (pandas.DataFrame): Edge detection results.
+        analysis_results (dict): Analysis results from create_edge_dataframe_report.
+        detected_lines (list, optional): List of detected lines (angle, dist). Defaults to None.
     """
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('Edge and Line Detection Analysis', fontsize=16)
     
     # Original image
     axes[0, 0].imshow(original_df.values, cmap='gray')
@@ -218,12 +294,25 @@ def visualize_results_with_pandas(original_df, edges_df, analysis_results):
     axes[0, 1].set_title('Detected Edges')
     axes[0, 1].axis('off')
     
-    # Edge overlay
-    overlay = original_df.values.copy()
-    edge_mask = edges_df.values > 0
-    overlay[edge_mask] = 255
-    axes[0, 2].imshow(overlay, cmap='gray')
-    axes[0, 2].set_title('Edges Overlay')
+    # --- MODIFICATION: Edge and Line overlay ---
+    # Create a color image from the grayscale original to draw colored lines on it
+    overlay_rgb = np.stack([original_df.values.astype(np.uint8)]*3, axis=-1)
+    
+    # Draw detected lines in red if they exist
+    if detected_lines:
+        y_max, x_max = original_df.shape
+        axes[0, 2].set_ylim(y_max, 0) # Match image coordinate system
+        axes[0, 2].set_xlim(0, x_max)
+        
+        for angle, dist in detected_lines:
+            # Convert line from polar (angle, dist) to two cartesian points
+            # This robustly draws a line across the entire image width
+            y0 = (dist - 0 * np.cos(angle)) / np.sin(angle)
+            y1 = (dist - x_max * np.cos(angle)) / np.sin(angle)
+            axes[0, 2].plot((0, x_max), (y0, y1), '-r', linewidth=1)
+
+    axes[0, 2].imshow(original_df.values, cmap='gray') # Show image under lines
+    axes[0, 2].set_title('Detected Lines Overlay')
     axes[0, 2].axis('off')
     
     # Row profile
@@ -249,9 +338,51 @@ def visualize_results_with_pandas(original_df, edges_df, analysis_results):
     Max Edge Col: {profile_data['max_edge_col']}"""
     
     axes[1, 2].text(0.1, 0.5, stats_text, transform=axes[1, 2].transAxes, 
-                   fontsize=10, verticalalignment='center')
+                   fontsize=10, verticalalignment='center', family='monospace')
     axes[1, 2].set_title('Statistics')
     axes[1, 2].axis('off')
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
+
+def test_multiple_thresholds(image_path, thresholds=[50, 100, 150, 200]):
+    """
+    Test multiple thresholds to see the difference in edge detection.
+    
+    Args:
+        image_path (str): Path to the input image
+        thresholds (list): List of threshold values to test
+    """
+    fig, axes = plt.subplots(1, len(thresholds) + 1, figsize=(20, 5))
+    
+    img_df = load_image_as_dataframe(image_path)
+    
+    # Calculate gradients once
+    grad_x = ndimage.sobel(img_df.values, axis=1)
+    grad_y = ndimage.sobel(img_df.values, axis=0)
+    magnitude = np.sqrt(grad_x**2 + grad_y**2)
+    
+    # Show original image
+    axes[0].imshow(img_df.values, cmap='gray')
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+
+    for i, threshold in enumerate(thresholds):
+        # Apply threshold
+        binary_edges = magnitude > threshold
+        edges = binary_edges.astype(int) * 255
+        
+        # Count edge pixels
+        edge_count = np.sum(binary_edges)
+        edge_percentage = (edge_count / magnitude.size) * 100
+        
+        # Plot edges
+        ax = axes[i+1]
+        ax.imshow(edges, cmap='gray')
+        ax.set_title(f'Threshold: {threshold}\n{edge_percentage:.1f}% edges')
+        ax.axis('off')
+        
+        print(f"Threshold {threshold}: {edge_count} edge pixels ({edge_percentage:.2f}%)")
     
     plt.tight_layout()
     plt.show()
@@ -295,13 +426,22 @@ if __name__ == "__main__":
     import time
     
     try:
-        image_path = "pic2_zoomed.png"  # Replace with your image path
+        image_path = "2.jpg"  # Replace with your image path
         
-        print("Starting ULTRA-FAST edge detection...")
+        # First, check the gradient range to choose appropriate threshold
+        print("Checking gradient magnitude range...")
+        magnitude_array = check_gradient_range(image_path)
+        
+        # Test multiple thresholds to see the difference
+        print("\nTesting multiple thresholds...")
+        test_multiple_thresholds(image_path, thresholds=[50, 80, 120, 150])
+        
+        print("\nStarting edge detection with chosen threshold...")
         start_time = time.time()
         
-        # Use the ultra-fast version
-        original_df, edges_df, magnitude_df = ultra_fast_sobel_pandas(image_path, threshold=50)
+        # Use a higher threshold based on your preference
+        chosen_threshold = 120  # Adjust this based on the test results above
+        original_df, edges_df, magnitude_df = ultra_fast_sobel_pandas(image_path, threshold=chosen_threshold)
         
         processing_time = time.time() - start_time
         print(f"Edge detection completed in {processing_time:.3f} seconds")
@@ -312,8 +452,12 @@ if __name__ == "__main__":
         
         report = create_edge_dataframe_report(edges_df, original_df)
         
+        # --- NEW: Call the line detection function ---
+        # We look for 4 peaks in a narrow 5-degree range around horizontal
+        detected_lines = detect_lines_with_hough(edges_df, num_peaks=4, angle_range_deg=5)
+        
         analysis_time = time.time() - analysis_start
-        print(f"Analysis completed in {analysis_time:.3f} seconds")
+        print(f"Analysis and line detection completed in {analysis_time:.3f} seconds")
         
         # Display results
         print("\nEdge Detection Analysis Report")
@@ -329,8 +473,8 @@ if __name__ == "__main__":
         print(f"\nRow with most edges: {report['profiles']['max_edge_row']}")
         print(f"Column with most edges: {report['profiles']['max_edge_col']}")
         
-        # Visualize results
-        visualize_results_with_pandas(original_df, edges_df, report)
+        # Visualize results, now including the detected lines
+        visualize_results_with_pandas(original_df, edges_df, report, detected_lines=detected_lines)
         
         # Save results as CSV files (optional - comment out for speed)
         # edges_df.to_csv('detected_edges.csv')
@@ -367,8 +511,11 @@ if __name__ == "__main__":
         # Analyze test results
         test_report = create_edge_dataframe_report(edges_test_df, test_df)
         
+        # Detect lines in test data
+        test_lines = detect_lines_with_hough(edges_test_df)
+        
         print("\nTest Results:")
         print(test_report['stats'])
         
         # Visualize test results
-        visualize_results_with_pandas(test_df, edges_test_df, test_report)
+        visualize_results_with_pandas(test_df, edges_test_df, test_report, detected_lines=test_lines)
