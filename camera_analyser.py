@@ -126,7 +126,7 @@ class CatheterAnalyser:
             view_x = int((px - self.view_offset_x) * self.zoom_level)
             view_y = int((py - self.view_offset_y) * self.zoom_level)
             color = (0, 255, 0) if self.state == 'ALIGNMENT' else ((255, 0, 0) if i < 2 else (0, 0, 255))
-            cv2.circle(self.display_image, (view_x, view_y), 10, color, -1)
+            cv2.circle(self.display_image, (view_x, view_y), 3, color, -1)
 
         # Create the info panel
         canvas = np.zeros((h + self.info_panel_height, w, 3), dtype=np.uint8)
@@ -219,7 +219,7 @@ class CatheterAnalyser:
 
         for i, (px, py) in enumerate(self.clicked_points):
             color = (255, 0, 0) if i < 2 else (0, 0, 255)
-            cv2.circle(final_image, (px, py), 10, color, -1)
+            cv2.circle(final_image, (px, py), 3, color, -1)
 
         cv2.line(final_image, (0, catheter_midpoint_y), (img_width, catheter_midpoint_y), (255, 255, 0), 2)
         cv2.line(final_image, (0, electrode_midpoint_y), (img_width, electrode_midpoint_y), (0, 255, 255), 2)
