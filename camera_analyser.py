@@ -195,42 +195,73 @@ class CatheterAnalyser:
         cv2.destroyAllWindows()
 
     def _calculate_and_save_results(self):
-        """Performs final calculations and saves the annotated image."""
-        print("\n4 points collected. Calculating results...")
+        """
+        Performs final calculations using individual point correction and saves the annotated image.
+        """
+        print("\n4 points collected. Calculating results with geometric correction...")
 
+        # 1. Establish Catheter Reference Frame
         catheter_y1, catheter_y2 = self.clicked_points[0][1], self.clicked_points[1][1]
-        catheter_midpoint_y = (catheter_y1 + catheter_y2) // 2
+        catheter_midpoint_y = (catheter_y1 + catheter_y2) / 2.0
         catheter_radius = abs(catheter_y1 - catheter_y2) / 2.0
 
-        electrode_y1, electrode_y2 = self.clicked_points[2][1], self.clicked_points[3][1]
-        electrode_midpoint_y = (electrode_y1 + electrode_y2) // 2
+        if catheter_radius == 0:
+            print("Error: Catheter radius is zero. Cannot calculate angle.")
+            return
 
-        offset = abs(catheter_midpoint_y - electrode_midpoint_y)
+        # 2. Calculate Individual Offsets for Each Electrode Edge
+        electrode_y_top = self.clicked_points[2][1]
+        electrode_y_bottom = self.clicked_points[3][1]
 
-        rotation_angle = 0.0
-        if catheter_radius > 0 and offset <= catheter_radius:
-            ratio = offset / catheter_radius
-            rotation_angle = math.degrees(math.asin(ratio))
-        else:
-            print("Error: Invalid points. Electrode midpoint is outside the catheter radius.")
+        offset_top = electrode_y_top - catheter_midpoint_y
+        offset_bottom = electrode_y_bottom - catheter_midpoint_y
 
+        # 3. Convert Each Offset to a True Angle (in radians)
+        final_rotation_angle_deg = 0.0
+        try:
+            # Ensure the ratio is within the valid domain for arcsin [-1, 1]
+            ratio_top = np.clip(offset_top / catheter_radius, -1.0, 1.0)
+            ratio_bottom = np.clip(offset_bottom / catheter_radius, -1.0, 1.0)
+
+            angle_top_rad = math.asin(ratio_top)
+            angle_bottom_rad = math.asin(ratio_bottom)
+
+            # 4. Find the True Centerline Angle by Averaging
+            final_rotation_angle_rad = (angle_top_rad + angle_bottom_rad) / 2.0
+            final_rotation_angle_deg = math.degrees(final_rotation_angle_rad)
+
+        except ValueError as e:
+            print(f"Error: Math domain error during calculation. This likely means one or more "
+                  f"electrode points were clicked outside the catheter bounds. Details: {e}")
+            return
+
+        # 5. Visualize the *True* Electrode Centerline
+        # Convert the final angle back to a pixel offset for drawing
+        true_offset_pixels = catheter_radius * math.sin(final_rotation_angle_rad)
+        true_electrode_midpoint_y = int(catheter_midpoint_y + true_offset_pixels)
+
+        # --- Create Final Annotated Image ---
         final_image = self.processed_image.copy()
         img_width = final_image.shape[1]
 
+        # Draw the 4 clicked points
         for i, (px, py) in enumerate(self.clicked_points):
             color = (255, 0, 0) if i < 2 else (0, 0, 255)
-            cv2.circle(final_image, (px, py), 3, color, -1)
+            cv2.circle(final_image, (px, py), 5, color, -1)
 
-        cv2.line(final_image, (0, catheter_midpoint_y), (img_width, catheter_midpoint_y), (255, 255, 0), 2)
-        cv2.line(final_image, (0, electrode_midpoint_y), (img_width, electrode_midpoint_y), (0, 255, 255), 2)
+        # Draw catheter centerline (Cyan)
+        cv2.line(final_image, (0, int(catheter_midpoint_y)), (img_width, int(catheter_midpoint_y)), (255, 255, 0), 2)
+        # Draw the TRUE electrode centerline (Yellow)
+        cv2.line(final_image, (0, true_electrode_midpoint_y), (img_width, true_electrode_midpoint_y), (0, 255, 255), 2)
 
-        text = f"Rotation Angle: {rotation_angle:.2f} degrees"
-        cv2.putText(final_image, text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2,
-                    cv2.LINE_AA)  # Adjusted scale and thickness
+        # Display the final calculated angle on the image
+        text = f"Rotation Angle: {final_rotation_angle_deg:.2f} degrees"
+        cv2.putText(final_image, text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
 
-        print(f"Catheter Radius: {catheter_radius:.2f} pixels | Pixel Offset: {offset} pixels")
-        print(f"Calculated Angle: {rotation_angle:.2f} degrees")
+        print(f"Catheter Radius: {catheter_radius:.2f} pixels")
+        print(f"Calculated True Angle: {final_rotation_angle_deg:.2f} degrees")
 
+        # Save the result
         os.makedirs(self.output_dir, exist_ok=True)
         timestamp = int(time.time())
         output_path = os.path.join(self.output_dir, f"{self.filename_prefix}_{timestamp}_analysis.png")
@@ -241,12 +272,11 @@ class CatheterAnalyser:
         h, w = final_image.shape[:2]
         final_canvas = np.zeros((h + self.info_panel_height, w, 3), dtype=np.uint8)
         final_canvas[0:h, 0:w] = final_image
-        cv2.putText(final_canvas, f"Final Angle: {rotation_angle:.2f} deg", (20, h + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                    (255, 255, 255), 1)  # Adjusted scale and thickness
+        cv2.putText(final_canvas, f"Final Angle: {final_rotation_angle_deg:.2f} deg", (20, h + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
         cv2.putText(final_canvas, "Press any key to exit.", (20, h + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                    (255, 255, 255), 1)  # Adjusted scale and thickness
+                    (255, 255, 255), 1)
         cv2.imshow(self.window_name, final_canvas)
-
 
 def capture_from_camera():
     """
