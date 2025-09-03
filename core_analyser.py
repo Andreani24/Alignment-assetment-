@@ -2,14 +2,14 @@ import cv2
 import numpy as np
 import os
 import math
+import time
 
 
-class CatheterAnalyser:
+class CoreAnalyser:
     """
-    An interactive tool to measure the rotational angle of a catheter's electrode
-    by manually selecting points on an image. It includes features for image
-    alignment, zoom/pan, and a robust calculation model that corrects for
-    geometric and perspective distortions.
+    The core interactive analysis engine. Measures rotational angle by manually
+    selecting points, correcting for geometric and perspective distortions.
+    This class is instantiated by a specific analyser (e.g., PictureAnalyser).
     """
 
     def __init__(self, image, real_catheter_diameter_mm, real_feature_width_mm, filename_prefix="capture"):
@@ -266,7 +266,7 @@ class CatheterAnalyser:
 
         cv2.imwrite(output_path, final_image)
         print(f"\nAnalysis complete. Saved result to: {output_path}")
-        cv2.namedWindow("Final Result", cv2.WINDOW_NORMAL)
+
         cv2.imshow("Final Result", final_image)
         cv2.waitKey(0)
 
@@ -307,39 +307,85 @@ class CatheterAnalyser:
         cv2.destroyAllWindows()
 
 
-def capture_from_camera():
-    """Opens a camera feed and captures a still image when 'c' is pressed."""
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open camera.")
+class PictureAnalyser:
+    """Handles loading an image from a file and running the analysis."""
+
+    def __init__(self, image_path, real_catheter_diameter_mm, real_feature_width_mm):
+        self.image_path = image_path
+        self.real_catheter_diameter_mm = real_catheter_diameter_mm
+        self.real_feature_width_mm = real_feature_width_mm
+
+    def run(self):
+        if not os.path.exists(self.image_path):
+            raise FileNotFoundError(f"Error: Image not found at {self.image_path}")
+
+        image = cv2.imread(self.image_path)
+        if image is None:
+            raise ValueError(f"Error: Could not read image from {self.image_path}")
+
+        base_filename = os.path.basename(self.image_path)
+        filename_prefix = os.path.splitext(base_filename)[0]
+
+        analyser = CoreAnalyser(
+            image=image,
+            real_catheter_diameter_mm=self.real_catheter_diameter_mm,
+            real_feature_width_mm=self.real_feature_width_mm,
+            filename_prefix=filename_prefix
+        )
+        analyser.run()
+
+
+class CameraAnalyser:
+    """Handles capturing an image from the camera and running the analysis."""
+
+    def __init__(self, real_catheter_diameter_mm, real_feature_width_mm):
+        self.real_catheter_diameter_mm = real_catheter_diameter_mm
+        self.real_feature_width_mm = real_feature_width_mm
+
+    def _capture_from_camera(self):
+        """Opens a camera feed and captures a still image when 'c' is pressed."""
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("Error: Could not open camera.")
+            return None
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Error: Can't receive frame. Exiting ...")
+                break
+
+            display_frame = frame.copy()
+            cv2.putText(display_frame, "Press 'c' to capture, 'q' to quit", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+            cv2.imshow('Camera Feed', display_frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                cap.release()
+                cv2.destroyAllWindows()
+                return None
+            elif key == ord('c'):
+                cap.release()
+                cv2.destroyAllWindows()
+                return frame
+
+        cap.release()
+        cv2.destroyAllWindows()
         return None
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Can't receive frame. Exiting ...")
-            break
-
-        # Add instruction text on a temporary copy
-        display_frame = frame.copy()
-        cv2.putText(display_frame, "Press 'c' to capture, 'q' to quit", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
-
-        cv2.imshow('Camera Feed', display_frame)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            cap.release()
-            cv2.destroyAllWindows()
-            return None
-        elif key == ord('c'):
-            cap.release()
-            cv2.destroyAllWindows()
-            return frame
-
-    cap.release()
-    cv2.destroyAllWindows()
-    return None
+    def run(self):
+        captured_image = self._capture_from_camera()
+        if captured_image is not None:
+            filename_prefix = f"capture_{int(time.time())}"
+            analyser = CoreAnalyser(
+                image=captured_image,
+                real_catheter_diameter_mm=self.real_catheter_diameter_mm,
+                real_feature_width_mm=self.real_feature_width_mm,
+                filename_prefix=filename_prefix
+            )
+            analyser.run()
 
 
 if __name__ == '__main__':
@@ -348,7 +394,6 @@ if __name__ == '__main__':
     REAL_ELECTRODE_WIDTH_MM = 0.5
 
     # --- Calculate the real-world width of the gap between electrodes ---
-    # This is now the feature we are measuring.
     if REAL_ELECTRODE_WIDTH_MM * 4 >= REAL_CATHETER_DIAMETER_MM * math.pi:
         raise ValueError("Electrode widths are too large for the given catheter diameter.")
 
@@ -359,22 +404,27 @@ if __name__ == '__main__':
 
     print(f"Calculated Real Gap Width: {REAL_GAP_WIDTH_MM:.4f} mm")
 
-    captured_image = capture_from_camera()
+    # --- CHOOSE MODE: "CAMERA" or "PICTURE" ---
+    MODE = "PICTURE"
 
-    if captured_image is not None:
-        try:
-            # Create a unique filename prefix for the saved output
-            import time
-
-            filename_prefix = f"capture_{int(time.time())}"
-
-            analyzer = CatheterAnalyser(
-                image=captured_image,
+    try:
+        if MODE == "CAMERA":
+            analyser = CameraAnalyser(
                 real_catheter_diameter_mm=REAL_CATHETER_DIAMETER_MM,
-                real_feature_width_mm=REAL_GAP_WIDTH_MM,  # We pass the calculated gap width
-                filename_prefix=filename_prefix
+                real_feature_width_mm=REAL_GAP_WIDTH_MM
             )
-            analyzer.run()
-        except (ValueError) as e:
-            print(f"An error occurred: {e}")
+            analyser.run()
+        elif MODE == "PICTURE":
+            # --- IMPORTANT: Set the path to your image file here ---
+            image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\pic7.jpg"  # <-- CHANGE THIS
+
+            analyser = PictureAnalyser(
+                image_path=image_path,
+                real_catheter_diameter_mm=REAL_CATHETER_DIAMETER_MM,
+                real_feature_width_mm=REAL_GAP_WIDTH_MM
+            )
+            analyser.run()
+
+    except (ValueError, FileNotFoundError) as e:
+        print(f"An error occurred: {e}")
 
