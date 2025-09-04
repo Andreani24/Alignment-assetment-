@@ -237,6 +237,9 @@ class CoreAnalyser:
         print(f"Apparent Angular Width (deg): {math.degrees(angle_app_width_rad):.2f}")
         print(f"Real Angular Width (deg): {math.degrees(self.real_angular_width):.2f}")
         print(f"Angular Correction Factor: {correction_factor_angle:.4f}")
+        print(f"Apparent Angle Top (deg): {math.degrees(angle_app_top_rad):.2f}")
+        print(f"Apparent Angle Bottom (deg): {math.degrees(angle_app_bottom_rad):.2f}")
+        print(f"Apparent Midpoint Angle (deg): {math.degrees(angle_app_midpoint_rad):.2f}")
         print(f"Final Rotation Angle: {final_angle_deg:.2f} degrees")
 
         # --- Visualization of True Centerline ---
@@ -415,7 +418,7 @@ if __name__ == '__main__':
             analyser.run()
         elif MODE == "PICTURE":
             # --- IMPORTANT: Set the path to your image file here ---
-            image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\0 degree.jpg"  # <-- CHANGE THIS
+            image_path = r"C:\Users\Linxi\Alignment-assetment-\analysis_output\capture_1756993502_analysis.png"  # <-- CHANGE THIS
 
 
             analyser = PictureAnalyser(
