@@ -390,7 +390,7 @@ class CameraAnalyser:
 
 if __name__ == '__main__':
     # --- DEFINE YOUR REAL-WORLD MEASUREMENTS HERE ---
-    REAL_CATHETER_DIAMETER_MM = 1.3
+    REAL_CATHETER_DIAMETER_MM = 1.4
     REAL_ELECTRODE_WIDTH_MM = 0.5
 
     # --- Calculate the real-world width of the gap between electrodes ---
@@ -398,14 +398,14 @@ if __name__ == '__main__':
         raise ValueError("Electrode widths are too large for the given catheter diameter.")
 
     R_real = REAL_CATHETER_DIAMETER_MM / 2.0
-    theta_electrode_rad = 2 * math.asin((REAL_ELECTRODE_WIDTH_MM / 2.0) / R_real)
+    theta_electrode_rad = (REAL_ELECTRODE_WIDTH_MM / R_real)
     theta_gap_rad = (2 * math.pi - 4 * theta_electrode_rad) / 4.0
     REAL_GAP_WIDTH_MM = 2 * R_real * math.sin(theta_gap_rad / 2.0)
 
     print(f"Calculated Real Gap Width: {REAL_GAP_WIDTH_MM:.4f} mm")
 
     # --- CHOOSE MODE: "CAMERA" or "PICTURE" ---
-    MODE = "CAMERA"
+    MODE = "PICTURE"
 
     try:
         if MODE == "CAMERA":
@@ -416,7 +416,7 @@ if __name__ == '__main__':
             analyser.run()
         elif MODE == "PICTURE":
             # --- IMPORTANT: Set the path to your image file here ---
-            image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\pic7.jpg"  # <-- CHANGE THIS
+            image_path = r"/Users/linxili/Documents/Alignment_accestment/pictures/5 degrees.jpg"  # <-- CHANGE THIS
 
             analyser = PictureAnalyser(
                 image_path=image_path,
