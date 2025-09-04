@@ -254,8 +254,7 @@ class CoreAnalyser:
         output_dir = "analysis_output"
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, f"{self.filename_prefix}_analysis.png")
-
-        # Create a final image with info panel
+# Create a final image with info panel
         final_panel = np.zeros((self.info_panel_height, self.original_image.shape[1], 3), dtype=np.uint8)
         text = f"Rotation Angle: {final_angle_deg:.2f} degrees"
         (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
@@ -398,7 +397,7 @@ if __name__ == '__main__':
         raise ValueError("Electrode widths are too large for the given catheter diameter.")
 
     R_real = REAL_CATHETER_DIAMETER_MM / 2.0
-    theta_electrode_rad = 2 * math.asin((REAL_ELECTRODE_WIDTH_MM / 2.0) / R_real)
+    theta_electrode_rad = REAL_ELECTRODE_WIDTH_MM / R_real
     theta_gap_rad = (2 * math.pi - 4 * theta_electrode_rad) / 4.0
     REAL_GAP_WIDTH_MM = 2 * R_real * math.sin(theta_gap_rad / 2.0)
 
@@ -416,7 +415,7 @@ if __name__ == '__main__':
             analyser.run()
         elif MODE == "PICTURE":
             # --- IMPORTANT: Set the path to your image file here ---
-            image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\pic7.jpg"  # <-- CHANGE THIS
+            image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\0 degree.jpg"  # <-- CHANGE THIS
 
             analyser = PictureAnalyser(
                 image_path=image_path,
