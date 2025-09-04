@@ -398,14 +398,14 @@ if __name__ == '__main__':
         raise ValueError("Electrode widths are too large for the given catheter diameter.")
 
     R_real = REAL_CATHETER_DIAMETER_MM / 2.0
-    theta_electrode_rad = 2 * math.asin((REAL_ELECTRODE_WIDTH_MM / 2.0) / R_real)
+    theta_electrode_rad = REAL_ELECTRODE_WIDTH_MM / R_real
     theta_gap_rad = (2 * math.pi - 4 * theta_electrode_rad) / 4.0
     REAL_GAP_WIDTH_MM = 2 * R_real * math.sin(theta_gap_rad / 2.0)
 
     print(f"Calculated Real Gap Width: {REAL_GAP_WIDTH_MM:.4f} mm")
 
     # --- CHOOSE MODE: "CAMERA" or "PICTURE" ---
-    MODE = "PICTURE"
+    MODE = "CAMERA"
 
     try:
         if MODE == "CAMERA":
