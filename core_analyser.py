@@ -390,7 +390,7 @@ class CameraAnalyser:
 
 if __name__ == '__main__':
     # --- DEFINE YOUR REAL-WORLD MEASUREMENTS HERE ---
-    REAL_CATHETER_DIAMETER_MM = 1.4
+    REAL_CATHETER_DIAMETER_MM = 1.3
     REAL_ELECTRODE_WIDTH_MM = 0.5
 
     # --- Calculate the real-world width of the gap between electrodes ---
@@ -405,7 +405,7 @@ if __name__ == '__main__':
     print(f"Calculated Real Gap Width: {REAL_GAP_WIDTH_MM:.4f} mm")
 
     # --- CHOOSE MODE: "CAMERA" or "PICTURE" ---
-    MODE = "PICTURE"
+    MODE = "CAMERA"
 
     try:
         if MODE == "CAMERA":
