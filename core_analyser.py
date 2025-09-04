@@ -417,6 +417,7 @@ if __name__ == '__main__':
             # --- IMPORTANT: Set the path to your image file here ---
             image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\0 degree.jpg"  # <-- CHANGE THIS
 
+
             analyser = PictureAnalyser(
                 image_path=image_path,
                 real_catheter_diameter_mm=REAL_CATHETER_DIAMETER_MM,
