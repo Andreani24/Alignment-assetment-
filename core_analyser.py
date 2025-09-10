@@ -237,6 +237,9 @@ class CoreAnalyser:
         print(f"Apparent Angular Width (deg): {math.degrees(angle_app_width_rad):.2f}")
         print(f"Real Angular Width (deg): {math.degrees(self.real_angular_width):.2f}")
         print(f"Angular Correction Factor: {correction_factor_angle:.4f}")
+        print(f"Apparent Angle Top (deg): {math.degrees(angle_app_top_rad):.2f}")
+        print(f"Apparent Angle Bottom (deg): {math.degrees(angle_app_bottom_rad):.2f}")
+        print(f"Apparent Midpoint Angle (deg): {math.degrees(angle_app_midpoint_rad):.2f}")
         print(f"Final Rotation Angle: {final_angle_deg:.2f} degrees")
 
         # --- Visualization of True Centerline ---
@@ -254,8 +257,7 @@ class CoreAnalyser:
         output_dir = "analysis_output"
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, f"{self.filename_prefix}_analysis.png")
-
-        # Create a final image with info panel
+# Create a final image with info panel
         final_panel = np.zeros((self.info_panel_height, self.original_image.shape[1], 3), dtype=np.uint8)
         text = f"Rotation Angle: {final_angle_deg:.2f} degrees"
         (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
@@ -405,7 +407,7 @@ if __name__ == '__main__':
     print(f"Calculated Real Gap Width: {REAL_GAP_WIDTH_MM:.4f} mm")
 
     # --- CHOOSE MODE: "CAMERA" or "PICTURE" ---
-    MODE = "CAMERA"
+    MODE = "PICTURE"
 
     try:
         if MODE == "CAMERA":
@@ -416,7 +418,8 @@ if __name__ == '__main__':
             analyser.run()
         elif MODE == "PICTURE":
             # --- IMPORTANT: Set the path to your image file here ---
-            image_path = r"C:\Users\Linxi\Alignment-assetment-\pictures\pic7.jpg"  # <-- CHANGE THIS
+            image_path = r"C:\Users\admin\PycharmProjects\Alignment_accestment\pictures\BIB15.jpg"  # <-- CHANGE THIS
+
 
             analyser = PictureAnalyser(
                 image_path=image_path,
