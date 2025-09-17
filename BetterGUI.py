@@ -418,15 +418,23 @@ class AnalysisApp:
         instruction_label.pack(pady=(0, 10))
         button_frame = tk.Frame(frame)
         button_frame.pack()
-        photo_button = tk.Button(button_frame, text="Use Picture", command=self.run_picture_mode, font=("Helvetica", 10), width=15)
+        photo_button = tk.Button(button_frame, text="Use Picture", command=self.run_picture_mode,
+                                 font=("Helvetica", 10), width=15)
         photo_button.pack(side=tk.LEFT, padx=5)
-        camera_button = tk.Button(button_frame, text="Use Camera", command=self.run_camera_mode, font=("Helvetica", 10), width=15)
+        camera_button = tk.Button(button_frame, text="Use Camera", command=self.run_camera_mode, font=("Helvetica", 10),
+                                  width=15)
         camera_button.pack(side=tk.LEFT, padx=5)
 
     def run_picture_mode(self):
         self.root.withdraw()  # Hide the main GUI window
+
+        # --- MODIFIED LINE ---
+        # The 'initialdir' parameter tells the dialog where to open.
+        default_image_folder = "C:/Users/admin/Desktop/Images"
+
         file_path = filedialog.askopenfilename(
             title="Select an image file",
+            initialdir=default_image_folder,  # This line was added
             filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")]
         )
         if file_path:
