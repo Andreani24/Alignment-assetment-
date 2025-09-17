@@ -5,7 +5,7 @@ import math
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
-
+import os
 
 class CoreAnalyser:
     """
