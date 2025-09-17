@@ -42,23 +42,9 @@ class CoreAnalyser:
 
         self.info_panel_height = 120
 
-        # --- Initial Scaling for window size ---
-        max_display_width = 1200
-        max_display_height = 800
-
-        h, w = self.original_image.shape[:2]
-        aspect_ratio = w / h
-
-        if w > h:
-            new_w = min(w, max_display_width)
-            new_h = int(new_w / aspect_ratio)
-        else:
-            new_h = min(h, max_display_height)
-            new_w = int(new_h * aspect_ratio)
-
-        self.initial_scale_factor = new_w / w
-        self.scaled_original_image = cv2.resize(self.original_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        self.scaled_h, self.scaled_w = self.scaled_original_image.shape[:2]
+        # --- MINIMAL CHANGE: Removed all initial scaling logic ---
+        # The code now works directly with the original image dimensions.
+        self.h, self.w = self.original_image.shape[:2]
 
     def _calculate_real_angular_width(self):
         if self.real_catheter_diameter_mm <= 0 or self.real_feature_width_mm <= 0:
@@ -69,22 +55,24 @@ class CoreAnalyser:
         return 2 * math.asin((self.real_feature_width_mm / 2.0) / real_radius)
 
     def _update_display(self):
-        h, w = self.scaled_h, self.scaled_w
-        zoomed_w, zoomed_h = int(w * self.zoom_level), int(h * self.zoom_level)
+        # MINIMAL CHANGE: Simplified to work directly on the original image without scaling
+        zoomed_w, zoomed_h = int(self.w * self.zoom_level), int(self.h * self.zoom_level)
         view_x = int(self.pan_offset[0])
         view_y = int(self.pan_offset[1])
-        view_x = np.clip(view_x, 0, zoomed_w - w)
-        view_y = np.clip(view_y, 0, zoomed_h - h)
+
+        view_x = np.clip(view_x, 0, zoomed_w - self.w)
+        view_y = np.clip(view_y, 0, zoomed_h - self.h)
         self.pan_offset = np.array([float(view_x), float(view_y)])
-        visible_region = cv2.resize(self.scaled_original_image, (zoomed_w, zoomed_h), interpolation=cv2.INTER_LINEAR)
-        visible_region = visible_region[view_y:view_y + h, view_x:view_x + w]
+
+        zoomed_image = cv2.resize(self.original_image, (zoomed_w, zoomed_h), interpolation=cv2.INTER_LINEAR)
+
+        visible_region = zoomed_image[view_y:view_y + self.h, view_x:view_x + self.w]
         self.display_image = visible_region.copy()
 
         for i, (ox, oy) in enumerate(self.clicked_points):
-            sx = ox * self.initial_scale_factor
-            sy = oy * self.initial_scale_factor
-            vx = int((sx * self.zoom_level) - self.pan_offset[0])
-            vy = int((sy * self.zoom_level) - self.pan_offset[1])
+            # MINIMAL CHANGE: Removed scaling factor from coordinate calculation
+            vx = int((ox * self.zoom_level) - self.pan_offset[0])
+            vy = int((oy * self.zoom_level) - self.pan_offset[1])
             color = (255, 0, 0) if (self.phase == "ALIGNMENT" or i < 2) else (0, 0, 255)
             cv2.circle(self.display_image, (vx, vy), 5, color, -1)
 
@@ -129,27 +117,25 @@ class CoreAnalyser:
             self.pan_start = np.array([x, y])
         elif event == cv2.EVENT_MOUSEWHEEL:
             zoom_factor = 1.1 if flags > 0 else 1 / 1.1
-            cursor_on_scaled_x = (self.pan_offset[0] + x) / self.zoom_level
-            cursor_on_scaled_y = (self.pan_offset[1] + y) / self.zoom_level
+            cursor_on_original_x = (self.pan_offset[0] + x) / self.zoom_level
+            cursor_on_original_y = (self.pan_offset[1] + y) / self.zoom_level
             self.zoom_level *= zoom_factor
             self.zoom_level = np.clip(self.zoom_level, 1.0, 20.0)
-            self.pan_offset[0] = (cursor_on_scaled_x * self.zoom_level) - x
-            self.pan_offset[1] = (cursor_on_scaled_y * self.zoom_level) - y
+            self.pan_offset[0] = (cursor_on_original_x * self.zoom_level) - x
+            self.pan_offset[1] = (cursor_on_original_y * self.zoom_level) - y
         elif event == cv2.EVENT_LBUTTONDOWN:
-            if y < self.scaled_h:  # Ensure clicks are on the image, not the panel
+            if y < self.h:
                 if self.phase == "ALIGNMENT" and len(self.clicked_points) < 2:
                     self.point_history.append(list(self.clicked_points))
-                    scaled_px = (self.pan_offset[0] + x) / self.zoom_level
-                    scaled_py = (self.pan_offset[1] + y) / self.zoom_level
-                    px = int(scaled_px / self.initial_scale_factor)
-                    py = int(scaled_py / self.initial_scale_factor)
+                    # MINIMAL CHANGE: Simplified to remove scaling factor
+                    px = int((self.pan_offset[0] + x) / self.zoom_level)
+                    py = int((self.pan_offset[1] + y) / self.zoom_level)
                     self.clicked_points.append((px, py))
                 elif self.phase == "MEASUREMENT" and len(self.clicked_points) < 4:
                     self.point_history.append(list(self.clicked_points))
-                    scaled_px = (self.pan_offset[0] + x) / self.zoom_level
-                    scaled_py = (self.pan_offset[1] + y) / self.zoom_level
-                    px = int(scaled_px / self.initial_scale_factor)
-                    py = int(scaled_py / self.initial_scale_factor)
+                    # MINIMAL CHANGE: Simplified to remove scaling factor
+                    px = int((self.pan_offset[0] + x) / self.zoom_level)
+                    py = int((self.pan_offset[1] + y) / self.zoom_level)
                     self.clicked_points.append((px, py))
         self._update_display()
 
@@ -169,7 +155,10 @@ class CoreAnalyser:
         rot_mat[0, 2] += (new_w / 2) - center[0]
         rot_mat[1, 2] += (new_h / 2) - center[1]
         self.original_image = cv2.warpAffine(self.original_image, rot_mat, (new_w, new_h))
-        self.scaled_original_image = cv2.warpAffine(self.scaled_original_image, rot_mat, (int(new_w * self.initial_scale_factor), int(new_h * self.initial_scale_factor)))
+
+        # MINIMAL CHANGE: Removed reference to the deleted scaled_original_image
+        self.h, self.w = self.original_image.shape[:2]  # Update dimensions after rotation
+
         self.clicked_points = []
         self.point_history = []
         self.phase = "MEASUREMENT"
@@ -204,18 +193,9 @@ class CoreAnalyser:
         img_width = self.original_image.shape[1]
 
         # Draw analysis lines on the original image
-        cv2.line(self.original_image, (0, int(catheter_midpoint_y)), (img_width, int(catheter_midpoint_y)), (255, 255, 0), 2)
+        cv2.line(self.original_image, (0, int(catheter_midpoint_y)), (img_width, int(catheter_midpoint_y)),
+                 (255, 255, 0), 2)
         cv2.line(self.original_image, (0, true_centerline_y), (img_width, true_centerline_y), (0, 255, 255), 2)
-
-        # Checks
-        # print(f"Apparent Radius (px): {apparent_radius_px:.2f}")
-        # print(f"Apparent Angular Width (deg): {math.degrees(angle_app_width_rad):.2f}")
-        # print(f"Real Angular Width (deg): {math.degrees(self.real_angular_width):.2f}")
-        # print(f"Angular Correction Factor: {correction_factor_angle:.4f}")
-        # print(f"Apparent Angle Top (deg): {math.degrees(angle_app_top_rad):.2f}")
-        # print(f"Apparent Angle Bottom (deg): {math.degrees(angle_app_bottom_rad):.2f}")
-        # print(f"Apparent Midpoint Angle (deg): {math.degrees(angle_app_midpoint_rad):.2f}")
-        # print(f"Final Rotation Angle: {final_angle_deg:.2f} degrees")
 
         # Create the final image with an info panel
         final_panel = np.zeros((self.info_panel_height, self.original_image.shape[1], 3), dtype=np.uint8)
@@ -226,22 +206,17 @@ class CoreAnalyser:
         cv2.putText(final_panel, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         final_image = cv2.vconcat([self.original_image, final_panel])
 
-        # --- MODIFIED SECTION: Interactive save for the final result ---
-        # Resize image for display
-        final_image_display = cv2.resize(
-            final_image,
-            (int(final_image.shape[1] * self.initial_scale_factor), int(final_image.shape[0] * self.initial_scale_factor)),
-            interpolation=cv2.INTER_AREA
-        )
+        # MINIMAL CHANGE: Removed scaling for the final result display
+        final_image_display = final_image
 
         result_window_name = "Final Result"
         cv2.imshow(result_window_name, final_image_display)
 
         # Add instructions to the final image display
         info_text = "Press 's' to save, 'q' to quit."
-        cv2.putText(final_image_display, info_text, (10, final_image_display.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(final_image_display, info_text, (10, final_image_display.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6, (0, 255, 255), 1, cv2.LINE_AA)
         cv2.imshow(result_window_name, final_image_display)
-
 
         # Loop to wait for user input (save or quit)
         while True:
@@ -277,7 +252,9 @@ class CoreAnalyser:
 
                         # Provide visual feedback on the image
                         display_copy = final_image_display.copy()
-                        cv2.putText(display_copy, "Saved!", (display_copy.shape[1] // 2 - 50, display_copy.shape[0] // 2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2, cv2.LINE_AA)
+                        cv2.putText(display_copy, "Saved!",
+                                    (display_copy.shape[1] // 2 - 50, display_copy.shape[0] // 2),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2, cv2.LINE_AA)
                         cv2.imshow(result_window_name, display_copy)
                         cv2.waitKey(1000)  # Show the message for 1 second
                         cv2.imshow(result_window_name, final_image_display)  # Revert
@@ -285,8 +262,9 @@ class CoreAnalyser:
                         messagebox.showerror("Save Error", f"Could not save the file.\n\n{e}")
 
     def run(self):
+        # MINIMAL CHANGE: Resize window to the original image's full size
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self.window_name, self.scaled_w, self.scaled_h + self.info_panel_height)
+        cv2.resizeWindow(self.window_name, self.w, self.h + self.info_panel_height)
         cv2.setMouseCallback(self.window_name, self._mouse_callback)
         self._update_display()
         while True:
@@ -318,7 +296,7 @@ class CoreAnalyser:
                     self._update_display()
                 if len(self.clicked_points) == 4:
                     self._calculate_and_save_results()
-                    self.restart_requested = True # Set flag to return to main menu
+                    self.restart_requested = True  # Set flag to return to main menu
                     break
         cv2.destroyAllWindows()
         return self.restart_requested
@@ -427,14 +405,8 @@ class AnalysisApp:
 
     def run_picture_mode(self):
         self.root.withdraw()  # Hide the main GUI window
-
-        # --- MODIFIED LINE ---
-        # The 'initialdir' parameter tells the dialog where to open.
-        default_image_folder = "C:/Users/admin/Desktop/Images"
-
         file_path = filedialog.askopenfilename(
             title="Select an image file",
-            initialdir=default_image_folder,  # This line was added
             filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")]
         )
         if file_path:
@@ -476,4 +448,3 @@ if __name__ == "__main__":
     main_root = tk.Tk()
     app = AnalysisApp(main_root)
     main_root.mainloop()
-
